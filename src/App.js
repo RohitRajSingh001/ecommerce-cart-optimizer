@@ -496,12 +496,10 @@ function App() {
                 <span>Total Amount Paid</span>
                 <span>₹{Math.round(receipt.total)}</span>
               </div>
-              
               <div className="receipt-savings">
                 🎉 Awesome! You saved a total of ₹{Math.round(receipt.savings)} on this purchase!
               </div>
             </div>
-
             <button
               className="btn-primary"
               style={{ width: "100%", padding: "14px" }}
@@ -512,10 +510,8 @@ function App() {
           </div>
         </div>
       )}
-
       <Footer />
     </div>
   );
 }
-
 export default App;
