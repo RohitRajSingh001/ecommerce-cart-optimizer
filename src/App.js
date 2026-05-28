@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import axios from "axios";
 import Header from "./components/Header";
 import ProductCard from "./components/ProductCard";
 import Cart from "./components/Cart";
@@ -67,7 +68,7 @@ function App() {
   };
 
   // Advanced Greedy Optimizer
-  const optimizeCart = () => {
+  const optimizeCart = async () => {
     const remainingBudget = parseInt(budget);
     if (isNaN(remainingBudget) || remainingBudget <= 0) {
       addToast("Please enter a valid target budget first.", "warning");
@@ -79,32 +80,84 @@ function App() {
       return;
     }
 
-    let items = cartItems.map((item) => {
-      const discountPercent = parseInt(item.discount) || 0;
-      const finalPrice = Math.round(
-        item.price * item.qty - (item.price * item.qty * discountPercent) / 100
-      );
-      return {
-        ...item,
-        finalPrice,
-      };
-    });
+    try {
+      // 1. Call Node.js Express server to perform 0/1 Knapsack DP Optimization
+      const response = await axios.post("http://localhost:5000/api/optimize", {
+        cartItems,
+        budget
+      });
+      
+      setOptimized(response.data.optimizedItems);
+      addToast("0/1 Knapsack DP complete! (Backend Server)", "success");
+    } catch (error) {
+      console.warn("[Backend Offline] Falling back to client-side 0/1 Knapsack DP solver.", error);
+      
+      // 2. CLIENT-SIDE FALLBACK SOLVER (0/1 Knapsack DP)
+      // Guarantees absolute correctness and functionality even if backend server is offline!
+      const flatItems = [];
+      cartItems.forEach((item) => {
+        const qty = parseInt(item.qty) || 1;
+        const discountPercent = parseInt(item.discount) || 0;
+        
+        const unitOriginalPrice = Math.round(item.price);
+        const unitDiscountedPrice = Math.round(unitOriginalPrice - (unitOriginalPrice * discountPercent) / 100);
+        const unitSavings = Math.round((unitOriginalPrice * discountPercent) / 100);
 
-    // Sort items by final discounted price (highest priority first) to prioritize higher-value items
-    items.sort((a, b) => b.finalPrice - a.finalPrice);
+        for (let i = 0; i < qty; i++) {
+          flatItems.push({
+            ...item,
+            weight: unitDiscountedPrice,  // Cost to buy (Weight)
+            value: unitSavings            // Discount saved (Value)
+          });
+        }
+      });
 
-    let selected = [];
-    let totalCost = 0;
+      const N = flatItems.length;
+      const W = remainingBudget;
+      const dp = Array(N + 1).fill(null).map(() => Array(W + 1).fill(0));
 
-    items.forEach((item) => {
-      if (totalCost + item.finalPrice <= remainingBudget) {
-        selected.push(item);
-        totalCost += item.finalPrice;
+      // Solve the DP Matrix
+      for (let i = 1; i <= N; i++) {
+        const item = flatItems[i - 1];
+        for (let w = 0; w <= W; w++) {
+          if (item.weight <= w) {
+            dp[i][w] = Math.max(dp[i - 1][w], dp[i - 1][w - item.weight] + item.value);
+          } else {
+            dp[i][w] = dp[i - 1][w];
+          }
+        }
       }
-    });
 
-    setOptimized(selected);
-    addToast("Smart cart optimization completed!", "success");
+      // Backtrack
+      let w = W;
+      const selectedFlat = [];
+      for (let i = N; i > 0; i--) {
+        const item = flatItems[i - 1];
+        if (dp[i][w] !== dp[i - 1][w]) {
+          selectedFlat.push(item);
+          w -= item.weight;
+        }
+      }
+
+      // Group units back by ID
+      const groupedSelected = [];
+      selectedFlat.forEach((flatItem) => {
+        const existing = groupedSelected.find((item) => item.id === flatItem.id);
+        if (existing) {
+          existing.qty += 1;
+          existing.finalPrice += flatItem.weight;
+        } else {
+          groupedSelected.push({
+            ...flatItem,
+            qty: 1,
+            finalPrice: flatItem.weight
+          });
+        }
+      });
+
+      setOptimized(groupedSelected);
+      addToast("0/1 Knapsack DP complete! (Local Failover)", "info");
+    }
   };
 
   // Replaces current active cart with the optimized items selection
@@ -496,10 +549,12 @@ function App() {
                 <span>Total Amount Paid</span>
                 <span>₹{Math.round(receipt.total)}</span>
               </div>
+              
               <div className="receipt-savings">
                 🎉 Awesome! You saved a total of ₹{Math.round(receipt.savings)} on this purchase!
               </div>
             </div>
+
             <button
               className="btn-primary"
               style={{ width: "100%", padding: "14px" }}
@@ -510,8 +565,10 @@ function App() {
           </div>
         </div>
       )}
+
       <Footer />
     </div>
   );
 }
+
 export default App;
